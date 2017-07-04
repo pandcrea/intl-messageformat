@@ -378,4 +378,28 @@ describe('IntlMessageFormat', function () {
             expect(ptMZ.format({num: 0})).to.equal('other');
         });
     });
+
+    describe('skeleton date formats', function () {
+        it('should output localized month name', function () {
+            var msg = 'The current month is {date, date, MMM}';
+            var date = new Date(1492819200000); // April 22nd, 2017
+
+            var mf = new IntlMessageFormat(msg, 'en');
+            expect(mf.format({date: date})).to.equal('The current month is Apr');
+
+            var mf = new IntlMessageFormat(msg, 'sv');
+            expect(mf.format({date: date})).to.equal('The current month is apr.');
+
+            var mf = new IntlMessageFormat(msg, 'ar');
+            expect(mf.format({date: date})).to.equal('The current month is أبريل');
+        });
+
+        it('should handle long formats', function () {
+            var msg = 'I was born on {date, date, MMM dd, yyyy}';
+            var mf = new IntlMessageFormat(msg, 'en');
+            var date = new Date(1126137600000); // September 8th, 2005
+
+            expect(mf.format({date: date})).to.equal('I was born on Sep 08, 2005');
+        });
+    });
 });

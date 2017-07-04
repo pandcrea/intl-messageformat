@@ -6,6 +6,8 @@ See the accompanying LICENSE file for terms.
 
 /* jslint esnext: true */
 
+import { dayOfWeek, dateDayOfYear, dateStartOf, dateDistanceInDays, dateMillisecondsInDay, pad } from './date/helpers.js';
+
 export default Compiler;
 
 function Compiler(locales, formats, pluralFn) {
@@ -95,6 +97,13 @@ Compiler.prototype.compileArgument = function (element) {
             };
 
         case 'dateFormat':
+            if (format.style === 'skeleton') {
+                return {
+                    id: element.id,
+                    format: this.compileSkeleton(format.skeleton)
+                };
+            }
+
             options = formats.date[format.style];
             return {
                 id    : element.id,
@@ -147,6 +156,219 @@ Compiler.prototype.compileOptions = function (element) {
     this.currentPlural = this.pluralStack.pop();
 
     return optionsHash;
+};
+
+Compiler.prototype.compileSkeleton = function (skeleton) {
+    var locales = this.locales;
+
+    return function (date) {
+        return skeleton.replace(/([a-z])\1*|'([^']|'')+'|''|./ig, function(current) {
+            var ret,
+                chr = current.charAt(0),
+                length = current.length;
+
+            if (chr === "j") {
+                // Locale preferred hHKk.
+                // http://www.unicode.org/reports/tr35/tr35-dates.html#Time_Data
+            }
+
+            if (chr === "Z") {
+                // Z..ZZZ: same as "xxxx".
+                if (length < 4) {
+                    chr = "x";
+                    length = 4;
+
+                // ZZZZ: same as "OOOO".
+                } else if (length < 5) {
+                    chr = "O";
+                    length = 4;
+
+                // ZZZZZ: same as "XXXXX"
+                } else {
+                    chr = "X";
+                    length = 5;
+                }
+            }
+
+            switch (chr) {
+                // Era
+                case "G":
+                    if (length < 4) {
+                        ret = new Intl.DateTimeFormat(locales, { era: 'short' }).format(date);
+                    } else {
+                        ret = new Intl.DateTimeFormat(locales, { era: 'long' }).format(date);
+                    }
+                    break;
+
+                // Year
+                case "y":
+
+                    // Plain year.
+                    // The length specifies the padding, but for two letters it also specifies the
+                    // maximum length.
+                    ret = date.getFullYear();
+                    if (length === 2) {
+                        ret = String(ret);
+                        ret = +ret.substr(ret.length - 2);
+                    }
+                    break;
+
+                case "Y":
+                    // Year in "Week of Year"
+                    // The length specifies the padding, but for two letters it also specifies the
+                    // maximum length.
+                    // yearInWeekofYear = date + DaysInAWeek - (dayOfWeek - firstDay) - minDays
+                    ret = new Date(date.getTime());
+                    ret.setDate(
+                        ret.getDate() + 7 -
+                        dateDayOfWeek(date, 1) -
+                        1 -
+                        4
+                    );
+                    ret = ret.getFullYear();
+                    if (length === 2) {
+                        ret = String(ret);
+                        ret = +ret.substr(ret.length - 2);
+                    }
+                    break;
+
+                // Month
+                case "M":
+                case "L":
+                    ret = date.getMonth() + 1;
+                    if (length === 3) {
+                        ret = new Intl.DateTimeFormat(locales, { month: 'short' }).format(date);
+                    } else if (length === 4) {
+                        ret = new Intl.DateTimeFormat(locales, { month: 'long' }).format(date);
+                    } else if (length === 5) {
+                        ret = new Intl.DateTimeFormat(locales, { month: 'narrow' }).format(date);
+                    }
+                    break;
+
+                // Week
+                case "w":
+
+                    // Week of Year.
+                    // woy = ceil( ( doy + dow of 1/1 ) / 7 ) - minDaysStuff ? 1 : 0.
+                    // TODO should pad on ww? Not documented, but I guess so.
+                    ret = dateDayOfWeek(dateStartOf(date, "year"), 1);
+                    ret = Math.ceil((dateDayOfYear(date) + ret) / 7) -
+                        (7 - ret >= 4 ? 0 : 1);
+                    break;
+
+                case "W":
+
+                    // Week of Month.
+                    // wom = ceil( ( dom + dow of `1/month` ) / 7 ) - minDaysStuff ? 1 : 0.
+                    ret = dateDayOfWeek(dateStartOf(date, "month"), 1);
+                    ret = Math.ceil((date.getDate() + ret) / 7) -
+                        (7 - ret >= 4 ? 0 : 1);
+                    break;
+
+                // Day
+                case "d":
+                    ret = pad(date.getDate(), length);
+                    break;
+
+                case "D":
+                    ret = dateDayOfYear(date) + 1;
+                    break;
+
+                case "F":
+
+                    // Day of Week in month. eg. 2nd Wed in July.
+                    ret = Math.floor(date.getDate() / 7) + 1;
+                    break;
+
+                // Week day
+                case "e":
+                case "c":
+                    if (length <= 2) {
+
+                        // Range is [1-7] (deduced by example provided on documentation)
+                        // TODO Should pad with zeros (not specified in the docs)?
+                        ret = dateDayOfWeek(date, 1) + 1;
+                        break;
+                    }
+
+                /* falls through */
+                case "E":
+                    if (length < 3) {
+                        ret = new Intl.DateTimeFormat(locales, { weekday: 'short' }).format(date);
+                    } else if (length === 4) {
+                        ret = new Intl.DateTimeFormat(locales, { weekday: 'long' }).format(date);
+                    } else {
+                        ret = new Intl.DateTimeFormat(locales, { weekday: 'narrow' }).format(date);
+                    }
+                    break;
+
+                // Period (AM or PM)
+                // case "a":
+                //     ret = properties.dayPeriods[date.getHours() < 12 ? "am" : "pm"];
+                //     break;
+
+                // Hour
+                case "h": // 1-12
+                    ret = (date.getHours() % 12) || 12;
+                    break;
+
+                case "H": // 0-23
+                    ret = date.getHours();
+                    break;
+
+                case "K": // 0-11
+                    ret = date.getHours() % 12;
+                    break;
+
+                case "k": // 1-24
+                    ret = date.getHours() || 24;
+                    break;
+
+                // Minute
+                case "m":
+                    ret = date.getMinutes();
+                    break;
+
+                // Second
+                case "s":
+                    ret = date.getSeconds();
+                    break;
+
+                case "S":
+                    ret = Math.round(date.getMilliseconds() * Math.pow(10, length - 3));
+                    break;
+
+                case "A":
+                    ret = Math.round(dateMillisecondsInDay(date) * Math.pow(10, length - 3));
+                    break;
+
+                // timeSeparator
+                case ":":
+                    ret = ':';
+                    break;
+
+                // ' literals.
+                case "'":
+                    current = current.replace(/''/, "'");
+                    if (length > 2) {
+                        current = current.slice( 1, -1 );
+                    }
+                    ret = current;
+                    break;
+
+                // Anything else is considered a literal, including [ ,:/.@#], chinese, japanese, and
+                // arabic characters.
+                default:
+                    ret = current;
+            }
+
+            // if (typeof ret === "number") {
+            //     ret = numberFormatters[length](ret);
+            // }
+
+            return ret;
+        });
+    };
 };
 
 // -- Compiler Helper Classes --------------------------------------------------
@@ -204,3 +426,4 @@ SelectFormat.prototype.getOption = function (value) {
     var options = this.options;
     return options[value] || options.other;
 };
+
